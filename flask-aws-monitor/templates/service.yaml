@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "flask-aws-monitor.fullname" . }}
+  labels:
+    {{- include "flask-aws-monitor.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 5001
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "flask-aws-monitor.selectorLabels" . | nindent 4 }}

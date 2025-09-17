@@ -1,0 +1,48 @@
+# Byte-compiled / compiled Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variable files
+.env
+.env.*
+
+# AWS credentials / keys
+*.pem
+.aws/
+credentials
+
+# VSCode / PyCharm config
+.vscode/
+.idea/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Ignore image or cache folders (optional)
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.cache/
+
+# Python dependency lock files
+poetry.lock
+Pipfile.lock
+
+# Helm / Kubernetes
+*.tgz           # packaged Helm charts
+charts/         # vendor charts if you use dependencies
+tmp/            # temp files
+
