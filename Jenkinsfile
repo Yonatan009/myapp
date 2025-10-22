@@ -1,3 +1,5 @@
+// Jenkinsfile — CI with Kaniko (Kubernetes agent, no Docker daemon)
+
 pipeline {
   agent {
     kubernetes {
@@ -8,8 +10,11 @@ spec:
   containers:
   - name: kaniko
     image: gcr.io/kaniko-project/executor:latest
-    command: ["/busybox/cat"]
+    command: ["/busybox/sh", "-c", "sleep 9999999"]
     tty: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
 """
     }
   }
@@ -17,8 +22,8 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo (e.g. user/app)')
-    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
+    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Path to Dockerfile')
     string(name: 'BUILD_CONTEXT',   defaultValue: '.',                             description: 'Build context')
   }
 
@@ -72,12 +77,13 @@ spec:
           container('kaniko') {
             sh """
               set -eu
-              WORKDIR="\$PWD"
+              WORKDIR="${env.WORKSPACE}"
               mkdir -p "\$WORKDIR/.docker-for-kaniko"
               AUTH_STR=\$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
               cat > "\$WORKDIR/.docker-for-kaniko/config.json" <<EOF
               { "auths": { "https://index.docker.io/v1/": { "auth": "\${AUTH_STR}" } } }
 EOF
+
               /kaniko/executor \
                 --context="\$WORKDIR/${params.BUILD_CONTEXT}" \
                 --dockerfile="\$WORKDIR/${params.DOCKERFILE_PATH}" \
