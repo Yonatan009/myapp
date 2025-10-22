@@ -5,14 +5,12 @@ image:
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
-aws:
-  useStaticCreds: true
-  existingSecret: "aws-credentials"   # create this secret in the target namespace
-  region: ""  
-    
+# Requires ConfigMap "aws-config" in the target namespace
+# with keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+
 service:
   port: 5001
-  targetPort: 5001  
+  targetPort: 5001
 
 ingress:
   enabled: false
