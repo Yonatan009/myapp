@@ -13,8 +13,7 @@ spec:
     metadata:
       labels:
         {{- include "flask-aws-monitor.selectorLabels" . | nindent 8 }}
-    spec:
-      serviceAccountName: {{ include "flask-aws-monitor.serviceAccountName" . }}
+    spec: 
       containers:
         - name: {{ include "flask-aws-monitor.name" . }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
