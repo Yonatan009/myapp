@@ -75,18 +75,18 @@ spec:
           container('kaniko') {
             sh """
               set -eu
-              WORKDIR="${env.WORKSPACE}"
-              mkdir -p "\$WORKDIR/.docker-for-kaniko"
+              # Write Docker Hub auth where Kaniko expects it
+              mkdir -p /kaniko/.docker
               AUTH_STR=\$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
-              cat > "\$WORKDIR/.docker-for-kaniko/config.json" <<EOF
+              cat > /kaniko/.docker/config.json <<EOF
               { "auths": { "https://index.docker.io/v1/": { "auth": "\${AUTH_STR}" } } }
 EOF
 
+              # Build + push (context and Dockerfile are in the Jenkins workspace)
               /kaniko/executor \
-                --context="\$WORKDIR/${params.BUILD_CONTEXT}" \
-                --dockerfile="\$WORKDIR/${params.DOCKERFILE_PATH}" \
+                --context="${WORKSPACE}/${params.BUILD_CONTEXT}" \
+                --dockerfile="${WORKSPACE}/${params.DOCKERFILE_PATH}" \
                 --destination="${env.FULL_IMAGE}" \
-                --docker-config="\$WORKDIR/.docker-for-kaniko" \
                 --snapshotMode=redo \
                 --use-new-run
             """
