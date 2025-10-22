@@ -1,5 +1,4 @@
 // Jenkinsfile — CI with Kaniko (Kubernetes agent, no Docker daemon)
-
 pipeline {
   agent {
     kubernetes {
@@ -9,8 +8,8 @@ kind: Pod
 spec:
   containers:
   - name: kaniko
-    image: gcr.io/kaniko-project/executor:latest
-    command: ["/busybox/sh", "-c", "sleep 9999999"]
+    image: gcr.io/kaniko-project/executor:debug
+    command: ["/busybox/sleep", "9999999"]
     tty: true
     volumeMounts:
       - name: workspace-volume
@@ -23,12 +22,11 @@ spec:
 
   parameters {
     string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Path to Dockerfile')
+    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
     string(name: 'BUILD_CONTEXT',   defaultValue: '.',                             description: 'Build context')
   }
 
   stages {
-
     stage('Checkout') {
       steps {
         checkout scm
