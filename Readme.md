@@ -1,89 +1,60 @@
-Flask AWS Monitor — CI/CD on EKS with Jenkins & Argo CD
+🚀 Flask AWS Monitor — CI/CD on EKS with Jenkins & Argo CD
 
-A minimal Flask service, containerized with Docker, deployed to Amazon EKS using Helm and Argo CD, and built via Jenkins (Kaniko; no Docker-in-Docker).
-The pipeline lints, optionally scans, builds & pushes to Docker Hub, and Argo CD continuously deploys it.
+A lightweight Flask service packaged with Docker, deployed to Amazon EKS via Helm and Argo CD, and built automatically through Jenkins using Kaniko (no Docker-in-Docker).
 
-Requires an AWS account with EKS + LoadBalancer support. See Prerequisites, Jenkins, and Argo CD below.
+The pipeline builds, tests, pushes to Docker Hub, and Argo CD continuously syncs the application to your Kubernetes cluster.
 
-Table of Contents
+⚙️ Requires AWS Account with EKS + LoadBalancer support.
+See Prerequisites
+ and Argo CD Setup
+.
 
-Features
+🧩 Features
 
-Repository Layout
+✅ Simple Flask REST API (listening on port 5001)
 
-Prerequisites
+🐳 Helm chart for Kubernetes deployment
 
-Local Build (optional)
+🔧 Jenkins CI/CD with Kaniko image builds
 
-Helm Chart — Runtime Configuration
+🚀 Argo CD for automated GitOps deployment
 
-Jenkins — Installation with Helm
+🔐 AWS credentials via ConfigMap for demo mode
 
-Argo CD — Install & First Deployment
-
-Access the Application
-
-Branching & Environments
-
-Troubleshooting
-
-Features
-
-Simple Flask HTTP service (listens on port 5001).
-
-Helm chart for Kubernetes deployment.
-
-Jenkins declarative pipeline: builds with Kaniko and pushes to Docker Hub.
-
-Argo CD GitOps deployment (auto-sync optional).
-
-Runtime AWS credentials via ConfigMap (aws-config) for demo simplicity.
-
-Repository Layout
+📂 Repository Structure
 myapp/
-├─ Jenkinsfile                        # CI pipeline: Kaniko build & push
-├─ flask-aws-monitor/                 # Application + Helm chart
-│  ├─ Dockerfile
-│  ├─ requirements.txt
-│  ├─ app.py                          # Flask app (port 5001)
-│  └─ flask-aws-monitor/              # Helm chart
-│     ├─ Chart.yaml
-│     ├─ values.yaml                  # Image, service ports, probes, etc.
-│     └─ templates/
-│        └─ deployment.yaml           # Requires ConfigMap `aws-config`
-└─ (optional) supporting files
+├── Jenkinsfile                   # CI pipeline (build & push)
+├── flask-aws-monitor/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app.py                    # Flask app (port 5001)
+│   └── flask-aws-monitor/
+│       ├── Chart.yaml
+│       ├── values.yaml           # Image, service, probes, etc.
+│       └── templates/
+│           └── deployment.yaml   # References ConfigMap 'aws-config'
 
-Prerequisites
+⚙️ Prerequisites
+Requirement	Description
+🟦 AWS	Active AWS Account with an EKS Cluster
+🧠 IAM	Node role permissions to create LoadBalancers
+🧰 kubectl	Configured to access your cluster
+🧭 Helm 3.x	Installed locally
+🐋 Docker Hub	Repository (e.g. yonatan009/flask-aws-monitor)
+🔄 Jenkins + Argo CD	Installed via Helm (see below)
+🧪 Local Build (Optional)
 
-AWS:
-
-EKS cluster with permission to provision LoadBalancers.
-
-Worker nodes with outbound internet access.
-
-kubectl configured against your EKS cluster.
-
-Helm 3.x installed.
-
-Docker Hub repository (e.g., yonatan009/flask-aws-monitor).
-
-Jenkins (installed via Helm; see below).
-
-Argo CD (see below).
-
-Local Build (optional)
-
-If you have local Docker and want to test the image:
+If you wish to test locally before CI/CD:
 
 cd flask-aws-monitor
 docker build -t yonatan009/flask-aws-monitor:dev -f Dockerfile .
 
 
-(Not required for CI/CD; Jenkins+Kaniko does the building.)
+Jenkins + Kaniko handle this automatically in CI.
 
-Helm Chart — Runtime Configuration
+⚡ Helm Configuration
 
-Main settings: flask-aws-monitor/flask-aws-monitor/values.yaml
+File: flask-aws-monitor/flask-aws-monitor/values.yaml
 
 image:
   repository: yonatan009/flask-aws-monitor
@@ -94,174 +65,118 @@ service:
   port: 5001
   targetPort: 5001
 
-readinessProbe:
-  tcpSocket: { port: 5001 }
-livenessProbe:
-  tcpSocket: { port: 5001 }
-
-Required ConfigMap (demo credentials)
-
-The Deployment requires a ConfigMap named aws-config in your target namespace (default: default) with these keys:
-
-AWS_ACCESS_KEY_ID
-
-AWS_SECRET_ACCESS_KEY
-
-AWS_DEFAULT_REGION
-
-Create it:
-
+Create Required ConfigMap
 kubectl -n default create configmap aws-config \
   --from-literal=AWS_ACCESS_KEY_ID=YOUR_KEY_ID \
   --from-literal=AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY \
   --from-literal=AWS_DEFAULT_REGION=us-east-1
 
 
-⚠️ Production note: prefer IRSA (IAM Role for Service Account) or Kubernetes Secrets (possibly via External Secrets) over ConfigMaps for credentials. The ConfigMap path is kept for simplicity and to match the exercise requirements.
+⚠️ For production, use IRSA or Secrets instead of ConfigMap.
 
-Jenkins — Installation with Helm
-
-Prereqs: running cluster, Helm 3, kubectl context set.
-
-Add repo & install
-
+🧰 Jenkins — Installation via Helm
 helm repo add jenkinsci https://charts.jenkins.io
 helm repo update
 helm install jenkins jenkinsci/jenkins
 
 
-Verify
+Check status:
 
 kubectl get pods -n default -l "app.kubernetes.io/instance=jenkins"
 helm status jenkins
 
-
-Wait until the Jenkins pod is Running.
-
-Get admin password
-
-kubectl exec -n default -it svc/jenkins -c jenkins -- /bin/cat /run/secrets/additional/chart-admin-password && echo
+🔑 Get Admin Password
+kubectl exec -n default -it svc/jenkins -c jenkins \
+  -- /bin/cat /run/secrets/additional/chart-admin-password && echo
 
 
-(Username: admin. Keep the password safe.)
+Default user: admin
 
-Access Jenkins
+🌐 Access Jenkins
 
-LoadBalancer (AWS recommended)
+LoadBalancer (AWS):
 
 kubectl -n default get svc jenkins
 
 
 Open the EXTERNAL-IP in your browser.
 
-Port-forward (alternative)
+Port-forward (local):
 
 kubectl -n default port-forward svc/jenkins 8080:8080
-# http://localhost:8080
 
-Jenkins Credentials & Pipeline
 
-Credentials → System → add Username/Password with ID dockerhub-creds (your Docker Hub login).
+→ http://localhost:8080
 
-Create a Pipeline job pointing at:
+💡 Jenkins Setup
 
-SCM: https://github.com/Yonatan009/myapp.git
+Add Credentials → System → dockerhub-creds (your Docker Hub login).
 
-Script path: Jenkinsfile
+Create a Pipeline from Git:
 
-Pipeline behavior:
+Repo: https://github.com/Yonatan009/myapp.git
 
-Lints (if tools available).
+Script Path: Jenkinsfile
 
-Builds the image with Kaniko in a K8s agent.
-
-Pushes to Docker Hub: yonatan009/flask-aws-monitor:<branch>-<short-sha>
-(Optionally also :0.1.0 depending on Jenkinsfile conditions.)
-
-Argo CD — Install & First Deployment
-
-Create namespace
-
+🧭 Argo CD — Install & Deploy
 kubectl create namespace argocd
-
-
-Install Argo CD
-
 kubectl apply -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 
-Wait for pods
+Wait for all pods to be ready:
 
 kubectl get pods -n argocd -w
 
 
-Expose Argo CD server (LoadBalancer)
+Expose ArgoCD:
 
-kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl patch svc argocd-server -n argocd \
+  -p '{"spec":{"type":"LoadBalancer"}}'
 kubectl get svc argocd-server -n argocd
 
 
-Get initial password (user: admin)
+Get login credentials:
 
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d && echo
 
-Create the Application (UI or YAML)
+Create Application
+Setting	Value
+Repo URL	https://github.com/Yonatan009/myapp.git
+Revision	main (or dev)
+Path	flask-aws-monitor
+Cluster	https://kubernetes.default.svc
+Namespace	default
 
-Source
+After creation → Sync → App deployed 🎉
 
-Repo: https://github.com/Yonatan009/myapp.git
-
-Revision: main (or dev)
-
-Path: flask-aws-monitor
-
-Destination
-
-Cluster: https://kubernetes.default.svc
-
-Namespace: default (or another)
-
-Click Sync to deploy. Argo renders the Helm chart and applies it.
-
-Reminder: ensure aws-config ConfigMap exists in your app namespace before the Pod can start.
-
-Access the Application
-
-Service is LoadBalancer on port 5001 by default:
-
+🌍 Access Your Application
 kubectl -n default get svc myapp-flask-aws-monitor -o wide
-# Open:
-#   http://<ELB-DNS>:5001/
 
 
-Optional: expose on port 80 (clean URL):
+Then open in browser:
 
-# values.yaml
+http://<ELB-DNS>:5001/
+
+
+For cleaner URL (optional):
+
 service:
-  type: LoadBalancer
   port: 80
   targetPort: 5001
 
+🧩 Branching & Environments
 
-Commit → push → Argo Sync, then visit http://<ELB-DNS>/.
+Use main for production
 
-Branching & Environments
+Use dev for testing with Argo tracking targetRevision: dev
 
-Use a dev branch with a dedicated Argo Application that tracks targetRevision: dev (e.g., myapp-dev in namespace dev).
-Jenkins tags images like dev-<sha>; set image.tag in the dev app’s values to match the pushed tag.
+Jenkins tags images automatically (dev-<sha>)
 
-Troubleshooting
-
-CreateContainerConfigError (e.g., “configmap aws-config not found”):
-Create the ConfigMap with required keys (see above).
-
-ImagePullBackOff:
-Ensure the tag in values.yaml exists in Docker Hub (0.1.0 or your CI tag).
-
-“Progressing” forever:
-Align containerPort/service/targetPort/probes (Flask here listens on 5001).
-
-ELB not reachable:
-Open the Security Group inbound rule to your client IP on the service port.
+🛠 Troubleshooting
+Issue	Solution
+❌ CreateContainerConfigError	Ensure aws-config ConfigMap exists
+❌ ImagePullBackOff	Verify tag in values.yaml exists in Docker Hub
+🕓 “Progressing” forever	Confirm containerPort, service, and probes match (5001)
+🌐 ELB not reachable	Add inbound rule (TCP 5001) in AWS Security Group
