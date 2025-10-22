@@ -1,14 +1,29 @@
 pipeline {
-  agent any
+  agent {
+    kubernetes {
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
+    command: ["/busybox/cat"]
+    tty: true
+"""
+    }
+  }
+
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repository')
-    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Path to Dockerfile')
+    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo (e.g. user/app)')
+    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
     string(name: 'BUILD_CONTEXT',   defaultValue: '.',                             description: 'Build context')
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -54,20 +69,24 @@ pipeline {
     stage('Build & Push (Kaniko)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh """
-            mkdir -p .docker-for-kaniko
-            AUTH_STR=\$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
-            cat > .docker-for-kaniko/config.json <<EOF
-            { "auths": { "https://index.docker.io/v1/": { "auth": "\${AUTH_STR}" } } }
+          container('kaniko') {
+            sh """
+              set -eu
+              WORKDIR="\$PWD"
+              mkdir -p "\$WORKDIR/.docker-for-kaniko"
+              AUTH_STR=\$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
+              cat > "\$WORKDIR/.docker-for-kaniko/config.json" <<EOF
+              { "auths": { "https://index.docker.io/v1/": { "auth": "\${AUTH_STR}" } } }
 EOF
-            docker run --rm \
-              -v "\$PWD":/workspace \
-              -v "\$PWD/.docker-for-kaniko":/kaniko/.docker \
-              gcr.io/kaniko-project/executor:latest \
-                --context=/workspace/${params.BUILD_CONTEXT} \
-                --dockerfile=/workspace/${params.DOCKERFILE_PATH} \
-                --destination=${env.FULL_IMAGE}
-          """
+              /kaniko/executor \
+                --context="\$WORKDIR/${params.BUILD_CONTEXT}" \
+                --dockerfile="\$WORKDIR/${params.DOCKERFILE_PATH}" \
+                --destination="${env.FULL_IMAGE}" \
+                --docker-config="\$WORKDIR/.docker-for-kaniko" \
+                --snapshotMode=redo \
+                --use-new-run
+            """
+          }
         }
       }
     }
@@ -90,3 +109,4 @@ EOF
     failure { echo "Pipeline failed" }
   }
 }
+
