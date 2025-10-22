@@ -6,7 +6,7 @@ image:
   pullPolicy: IfNotPresent
 
 aws:
-  useStaticCreds: true
+  useStaticCreds: false
   existingSecret: "aws-credentials"   # create this secret in the target namespace
   region: ""  
     
