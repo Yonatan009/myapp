@@ -1,4 +1,4 @@
-// Jenkinsfile — CI with Kaniko (Kubernetes agent, no Docker daemon)
+// Jenkinsfile — CI with Kaniko for ArgoCD GitOps flow
 pipeline {
   agent {
     kubernetes {
@@ -7,13 +7,13 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:debug
-    command: ["/busybox/sleep", "9999999"]
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:debug
+      command: ["/busybox/sleep", "9999999"]
+      tty: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
 """
     }
   }
@@ -27,6 +27,7 @@ spec:
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -37,9 +38,13 @@ spec:
     stage('Init Vars') {
       steps {
         script {
+          // short git sha
           env.SHORT_SHA   = sh(script: 'git rev-parse --short HEAD || echo local', returnStdout: true).trim()
+          // branch name safe for Docker tags
           env.SAFE_BRANCH = sh(script: 'echo "${BRANCH_NAME:-main}" | tr "/: " "-"', returnStdout: true).trim()
-          env.IMAGE_TAG   = "${env.SAFE_BRANCH}-${env.SHORT_SHA}"
+          // richer tag for traceability: <branch>-<BUILD_NUMBER>-<sha>
+          env.IMAGE_TAG   = "${env.SAFE_BRANCH}-${env.BUILD_NUMBER}-${env.SHORT_SHA}"
+          // full image name: <repo>:<tag>
           env.FULL_IMAGE  = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
           echo "IMAGE -> ${env.FULL_IMAGE}"
         }
@@ -85,7 +90,8 @@ EOF
                 --context="${WORKSPACE}/${params.BUILD_CONTEXT}" \
                 --dockerfile="${WORKSPACE}/${params.DOCKERFILE_PATH}" \
                 --destination="${env.FULL_IMAGE}" \
-                --destination="${params.DOCKERHUB_REPO}:0.1.0" \
+                --cache=true \
+                --cache-repo="${params.DOCKERHUB_REPO}" \
                 --snapshotMode=redo \
                 --use-new-run
             """
@@ -105,11 +111,39 @@ EOF
         """
       }
     }
+
+    // Update Helm values so ArgoCD will detect the new image tag
+    stage('Update Helm values') {
+      steps {
+        script {
+          // NOTE: change the path below to your real chart path if different
+          sh """
+          sed -i 's#^  tag: .*#  tag: "${env.IMAGE_TAG}"#' helm/flask-aws-monitor/values.yaml
+          """
+        }
+      }
+    }
+
+    // Commit & push to Git so ArgoCD will see the change
+    stage('Git Commit & Push') {
+      steps {
+        script {
+          sh """
+          git config user.name "Jenkins CI"
+          git config user.email "jenkins@example.com"
+          git add helm/flask-aws-monitor/values.yaml
+          git commit -m "Update image tag to ${env.IMAGE_TAG}" || true
+          git push origin ${env.SAFE_BRANCH}
+          """
+        }
+      }
+    }
+
   }
 
   post {
     success {
-      echo "Pushed: ${FULL_IMAGE}"
+      echo "Pushed image: ${FULL_IMAGE}"
     }
     failure {
       echo "Pipeline failed"
