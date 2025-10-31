@@ -21,11 +21,10 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',   defaultValue: 'yonatan009/flask-aws-monitor',                    description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH',  defaultValue: 'Dockerfile',                                       description: 'Dockerfile path')
-    string(name: 'BUILD_CONTEXT',    defaultValue: '.',                                                description: 'Build context')
-    // Path to Helm values.yaml (fixed)
-    string(name: 'CHART_VALUES_PATH', defaultValue: 'myapp/flask-aws-monitor/values.yaml',            description: 'Path to Helm values.yaml')
+    string(name: 'DOCKERHUB_REPO',   defaultValue: 'yonatan009/flask-aws-monitor',              description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH',  defaultValue: 'Dockerfile',                                 description: 'Dockerfile path')
+    string(name: 'BUILD_CONTEXT',    defaultValue: '.',                                          description: 'Build context')
+    string(name: 'CHART_VALUES_PATH',defaultValue: 'myapp/flask-aws-monitor/values.yaml',        description: 'Path to Helm values.yaml')
   }
 
   stages {
@@ -116,29 +115,36 @@ EOF
 
     // Update Helm values so ArgoCD will detect the new image tag
     stage('Update Helm values') {
+      environment {
+        VALUES_FILE = "${params.CHART_VALUES_PATH}"  // expose param as env for the sh below
+      }
       steps {
-        script {
-          sh """
-          test -f "${params.CHART_VALUES_PATH}" || { echo "Values file not found: ${params.CHART_VALUES_PATH}"; exit 2; }
-          # robust replace of the 'tag:' line (keeps indentation)
-          sed -i -E 's#(^[[:space:]]*tag:[[:space:]]*).*$#\\1\"${env.IMAGE_TAG}\"#' "${params.CHART_VALUES_PATH}"
-          """
-        }
+        // Use single-quoted triple string to avoid Groovy interpolation of $... inside the shell
+        sh '''
+          set -eu
+          echo "Values file: ${VALUES_FILE}"
+          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; exit 2; }
+
+          # Replace the `tag:` line (preserve indentation)
+          sed -i -E "s#(^[[:space:]]*tag:[[:space:]]*).*$#\\1\"${IMAGE_TAG}\"#" "${VALUES_FILE}"
+
+          echo "Updated image.tag to: ${IMAGE_TAG}"
+        '''
       }
     }
 
     // Commit & push to Git so ArgoCD will see the change
     stage('Git Commit & Push') {
       steps {
-        script {
-          sh """
+        sh '''
+          set -eu
           git config user.name "Jenkins CI"
           git config user.email "jenkins@example.com"
-          git add "${params.CHART_VALUES_PATH}"
-          git commit -m "Update image tag to ${env.IMAGE_TAG}" || true
-          git push origin ${env.SAFE_BRANCH}
-          """
-        }
+
+          git add "${CHART_VALUES_PATH}"
+          git commit -m "Update image tag to ${IMAGE_TAG}" || true
+          git push origin "${SAFE_BRANCH}"
+        '''
       }
     }
 
