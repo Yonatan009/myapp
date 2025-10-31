@@ -21,10 +21,11 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',   defaultValue: 'yonatan009/flask-aws-monitor',              description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH',  defaultValue: 'Dockerfile',                                 description: 'Dockerfile path')
-    string(name: 'BUILD_CONTEXT',    defaultValue: '.',                                          description: 'Build context')
-    string(name: 'CHART_VALUES_PATH',defaultValue: 'myapp/flask-aws-monitor/values.yaml',        description: 'Path to Helm values.yaml')
+    string(name: 'DOCKERHUB_REPO',    defaultValue: 'yonatan009/flask-aws-monitor',       description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH',   defaultValue: 'Dockerfile',                          description: 'Dockerfile path')
+    string(name: 'BUILD_CONTEXT',     defaultValue: '.',                                   description: 'Build context')
+    // FIX: default path that matches your repo tree
+    string(name: 'CHART_VALUES_PATH', defaultValue: 'flask-aws-monitor/values.yaml',       description: 'Path to Helm values.yaml')
   }
 
   stages {
@@ -39,13 +40,9 @@ spec:
     stage('Init Vars') {
       steps {
         script {
-          // short git sha
           env.SHORT_SHA   = sh(script: 'git rev-parse --short HEAD || echo local', returnStdout: true).trim()
-          // branch name safe for Docker tags
           env.SAFE_BRANCH = sh(script: 'echo "${BRANCH_NAME:-main}" | tr "/: " "-"', returnStdout: true).trim()
-          // richer tag for traceability: <branch>-<BUILD_NUMBER>-<sha>
           env.IMAGE_TAG   = "${env.SAFE_BRANCH}-${env.BUILD_NUMBER}-${env.SHORT_SHA}"
-          // full image name: <repo>:<tag>
           env.FULL_IMAGE  = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
           echo "IMAGE -> ${env.FULL_IMAGE}"
         }
@@ -113,35 +110,53 @@ EOF
       }
     }
 
-    // Update Helm values so ArgoCD will detect the new image tag
     stage('Update Helm values') {
       environment {
-        VALUES_FILE = "${params.CHART_VALUES_PATH}"  // expose param as env for the sh below
+        VALUES_FILE = "${params.CHART_VALUES_PATH}"
       }
       steps {
-        // Use single-quoted triple string to avoid Groovy interpolation of $... inside the shell
         sh '''
           set -eu
-          echo "Values file: ${VALUES_FILE}"
-          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; exit 2; }
+          echo "Workspace at: $(pwd)"
+          echo "Requested values file: ${VALUES_FILE}"
+
+          # Fallback if param path is wrong
+          if [ ! -f "${VALUES_FILE}" ]; then
+            if [ -f "flask-aws-monitor/values.yaml" ]; then
+              VALUES_FILE="flask-aws-monitor/values.yaml"
+              echo "Using fallback values file: ${VALUES_FILE}"
+            fi
+          fi
+
+          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; echo "Tree:"; ls -la; exit 2; }
 
           # Replace the `tag:` line (preserve indentation)
           sed -i -E "s#(^[[:space:]]*tag:[[:space:]]*).*$#\\1\"${IMAGE_TAG}\"#" "${VALUES_FILE}"
 
-          echo "Updated image.tag to: ${IMAGE_TAG}"
+          echo "Updated image.tag to: ${IMAGE_TAG} in ${VALUES_FILE}"
+
+          # Export so next stage can git add the exact file edited
+          echo "VALUES_FILE=${VALUES_FILE}" >> $WORKSPACE/.jenkins_env
         '''
       }
     }
 
-    // Commit & push to Git so ArgoCD will see the change
     stage('Git Commit & Push') {
       steps {
         sh '''
           set -eu
+
+          # Load the VALUES_FILE exported in previous stage
+          if [ -f "$WORKSPACE/.jenkins_env" ]; then
+            . "$WORKSPACE/.jenkins_env"
+          else
+            echo "Missing .jenkins_env"; exit 3
+          fi
+
           git config user.name "Jenkins CI"
           git config user.email "jenkins@example.com"
 
-          git add "${CHART_VALUES_PATH}"
+          git add "${VALUES_FILE}"
           git commit -m "Update image tag to ${IMAGE_TAG}" || true
           git push origin "${SAFE_BRANCH}"
         '''
