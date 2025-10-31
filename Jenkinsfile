@@ -21,9 +21,11 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
-    string(name: 'BUILD_CONTEXT',   defaultValue: '.',                             description: 'Build context')
+    string(name: 'DOCKERHUB_REPO',   defaultValue: 'yonatan009/flask-aws-monitor',                    description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH',  defaultValue: 'Dockerfile',                                       description: 'Dockerfile path')
+    string(name: 'BUILD_CONTEXT',    defaultValue: '.',                                                description: 'Build context')
+    // Path to Helm values.yaml (fixed)
+    string(name: 'CHART_VALUES_PATH', defaultValue: 'myapp/flask-aws-monitor/values.yaml',            description: 'Path to Helm values.yaml')
   }
 
   stages {
@@ -92,7 +94,7 @@ EOF
                 --destination="${env.FULL_IMAGE}" \
                 --cache=true \
                 --cache-repo="${params.DOCKERHUB_REPO}" \
-                --snapshotMode=redo \
+                --snapshot-mode=redo \
                 --use-new-run
             """
           }
@@ -116,9 +118,10 @@ EOF
     stage('Update Helm values') {
       steps {
         script {
-          // NOTE: change the path below to your real chart path if different
           sh """
-          sed -i 's#^  tag: .*#  tag: "${env.IMAGE_TAG}"#' helm/flask-aws-monitor/values.yaml
+          test -f "${params.CHART_VALUES_PATH}" || { echo "Values file not found: ${params.CHART_VALUES_PATH}"; exit 2; }
+          # robust replace of the 'tag:' line (keeps indentation)
+          sed -i -E 's#(^[[:space:]]*tag:[[:space:]]*).*$#\\1\"${env.IMAGE_TAG}\"#' "${params.CHART_VALUES_PATH}"
           """
         }
       }
@@ -131,7 +134,7 @@ EOF
           sh """
           git config user.name "Jenkins CI"
           git config user.email "jenkins@example.com"
-          git add helm/flask-aws-monitor/values.yaml
+          git add "${params.CHART_VALUES_PATH}"
           git commit -m "Update image tag to ${env.IMAGE_TAG}" || true
           git push origin ${env.SAFE_BRANCH}
           """
