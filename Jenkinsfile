@@ -21,11 +21,10 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',    defaultValue: 'yonatan009/flask-aws-monitor',       description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH',   defaultValue: 'Dockerfile',                          description: 'Dockerfile path')
-    string(name: 'BUILD_CONTEXT',     defaultValue: '.',                                   description: 'Build context')
-    // FIX: default path that matches your repo tree
-    string(name: 'CHART_VALUES_PATH', defaultValue: 'flask-aws-monitor/values.yaml',       description: 'Path to Helm values.yaml')
+    string(name: 'DOCKERHUB_REPO',    defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH',   defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
+    string(name: 'BUILD_CONTEXT',     defaultValue: '.',                             description: 'Build context')
+    string(name: 'CHART_VALUES_PATH', defaultValue: 'flask-aws-monitor/values.yaml', description: 'Path to Helm values.yaml')
   }
 
   stages {
@@ -120,7 +119,6 @@ EOF
           echo "Workspace at: $(pwd)"
           echo "Requested values file: ${VALUES_FILE}"
 
-          # Fallback if param path is wrong
           if [ ! -f "${VALUES_FILE}" ]; then
             if [ -f "flask-aws-monitor/values.yaml" ]; then
               VALUES_FILE="flask-aws-monitor/values.yaml"
@@ -128,15 +126,13 @@ EOF
             fi
           fi
 
-          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; echo "Tree:"; ls -la; exit 2; }
+          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; ls -la; exit 2; }
 
-          # Replace the `tag:` line (preserve indentation)
-          sed -i -E "s#(^[[:space:]]*tag:[[:space:]]*).*$#\\1\"${IMAGE_TAG}\"#" "${VALUES_FILE}"
+          sed -i -E 's#^([[:space:]]*tag:[[:space:]]*).*$#\\1"'"${IMAGE_TAG}"'"#' "${VALUES_FILE}"
 
           echo "Updated image.tag to: ${IMAGE_TAG} in ${VALUES_FILE}"
 
-          # Export so next stage can git add the exact file edited
-          echo "VALUES_FILE=${VALUES_FILE}" >> $WORKSPACE/.jenkins_env
+          printf 'VALUES_FILE=%s\n' "${VALUES_FILE}" > "$WORKSPACE/.jenkins_env"
         '''
       }
     }
@@ -145,8 +141,6 @@ EOF
       steps {
         sh '''
           set -eu
-
-          # Load the VALUES_FILE exported in previous stage
           if [ -f "$WORKSPACE/.jenkins_env" ]; then
             . "$WORKSPACE/.jenkins_env"
           else
