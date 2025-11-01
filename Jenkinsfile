@@ -1,4 +1,4 @@
-// Jenkinsfile — Kaniko CI, optional GitOps bump for Argo CD
+// Jenkinsfile — Kaniko CI with numeric+datetime tag, optional GitOps bump for Argo CD
 pipeline {
   agent {
     kubernetes {
@@ -21,9 +21,11 @@ spec:
   options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO', defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
+    string(name: 'DOCKERHUB_REPO', defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo, e.g. user/app')
+    string(name: 'BASE_VERSION',   defaultValue: '0.1', description: 'Semantic base, e.g. 0.1 or 1.0')
+    booleanParam(name: 'PUSH_LATEST', defaultValue: false, description: 'Also push :latest tag')
     booleanParam(name: 'ENABLE_ENV_REPO_BUMP', defaultValue: false, description: 'If true, update values.yaml tag in env/app repo')
-    string(name: 'ENV_REPO_URL',     defaultValue: 'https://github.com/Yonatan009/myapp.git', description: 'Env/App repo URL (values.yaml lives here)')
+    string(name: 'ENV_REPO_URL',     defaultValue: 'https://github.com/Yonatan009/myapp.git', description: 'Repo that contains values.yaml')
     string(name: 'ENV_REPO_BRANCH',  defaultValue: 'main', description: 'Branch to bump')
     string(name: 'ENV_VALUES_PATH',  defaultValue: 'flask-aws-monitor/values.yaml', description: 'Path to values.yaml inside the repo')
   }
@@ -40,13 +42,12 @@ spec:
     stage('Init vars') {
       steps {
         script {
-          def b = sh(script: 'git rev-parse --abbrev-ref HEAD || echo HEAD', returnStdout: true).trim()
-          if (b == 'HEAD') { b = 'main' }   // fallback when detached
-          env.SAFE_BRANCH = b.replaceAll('[/ :]', '-')
-          env.SHORT_SHA   = sh(script: 'git rev-parse --short HEAD || echo local', returnStdout: true).trim()
-          env.IMAGE_TAG   = "${env.SAFE_BRANCH}-${env.BUILD_NUMBER}-${env.SHORT_SHA}"
-          env.FULL_IMAGE  = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
-          echo "IMAGE -> ${env.FULL_IMAGE}"
+          // Build numeric+datetime tag: <BASE_VERSION>.<BUILD_NUMBER>-<YYYYMMDDHHMMSS>
+          env.DATE_UTC   = sh(script: 'date -u +%Y%m%dT%H%M%S', returnStdout: true).trim()
+          env.VERSION    = "${params.BASE_VERSION}.${env.BUILD_NUMBER}"
+          env.IMAGE_TAG  = "${env.VERSION}-${env.DATE_UTC}"
+          env.FULL_IMAGE = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
+          echo "IMAGE_TAG: ${env.IMAGE_TAG}"
         }
       }
     }
@@ -83,10 +84,15 @@ spec:
               cat > /kaniko/.docker/config.json <<EOF
               { "auths": { "https://index.docker.io/v1/": { "auth": "${AUTH_STR}" } } }
 EOF
+              DESTS="--destination=${FULL_IMAGE}"
+              if [ "${PUSH_LATEST}" = "true" ]; then
+                DESTS="$DESTS --destination=${DOCKERHUB_REPO}:latest"
+              fi
+
               /kaniko/executor \
                 --context="${WORKSPACE}/." \
                 --dockerfile="${WORKSPACE}/Dockerfile" \
-                --destination="${FULL_IMAGE}" \
+                $DESTS \
                 --cache=true \
                 --cache-repo="${DOCKERHUB_REPO}" \
                 --snapshot-mode=redo \
@@ -112,26 +118,26 @@ EOF
             if (!repoUrl.startsWith('https://')) { repoUrl = "https://${repoUrl}" }
             def sanitized = repoUrl.replaceFirst('https://','')
 
-            sh """
+            sh '''
               set -eu
               rm -rf env-repo
-              git clone --branch "${params.ENV_REPO_BRANCH}" "${repoUrl}" env-repo
+              git clone --branch "${ENV_REPO_BRANCH}" "${repoUrl}" env-repo
               cd env-repo
 
-              VALUES_FILE="${params.ENV_VALUES_PATH}"
-              test -f "\$VALUES_FILE" || { echo "values.yaml not found: \$VALUES_FILE"; ls -la; exit 2; }
+              VALUES_FILE="${ENV_VALUES_PATH}"
+              test -f "$VALUES_FILE" || { echo "values.yaml not found: $VALUES_FILE"; ls -la; exit 2; }
 
-              # set image.tag to the new tag
-              sed -i -E "s|^([[:space:]]*tag:[[:space:]]*).*\$|\\1\\\"${IMAGE_TAG}\\\"|" "\$VALUES_FILE"
+              # Replace: image.tag: "<anything>"  -> image.tag: "<IMAGE_TAG>"
+              sed -i -E 's|^([[:space:]]*tag:[[:space:]]*).*$|\\1"'"${IMAGE_TAG}"'"|' "$VALUES_FILE"
 
               git config user.name "Jenkins CI"
               git config user.email "jenkins@example.com"
-              git add "\$VALUES_FILE"
+              git add "$VALUES_FILE"
               git commit -m "Bump image tag to ${IMAGE_TAG}" || true
 
               git remote set-url origin "https://${PAT_USER}:${PAT_PSW}@${sanitized}"
-              git push origin "${params.ENV_REPO_BRANCH}"
-            """
+              git push origin "${ENV_REPO_BRANCH}"
+            '''
           }
         }
       }
@@ -139,7 +145,7 @@ EOF
   }
 
   post {
-    success { echo "Done. Pushed image: ${FULL_IMAGE}" }
+    success { echo "Done. Pushed: ${FULL_IMAGE}" }
     failure { echo "Pipeline failed" }
   }
 }
