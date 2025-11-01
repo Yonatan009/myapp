@@ -1,4 +1,5 @@
-// Jenkinsfile — CI with Kaniko for ArgoCD GitOps flow
+// Jenkinsfile - Minimal GitOps: build & push image, then bump Helm tag in env-repo
+
 pipeline {
   agent {
     kubernetes {
@@ -18,150 +19,91 @@ spec:
     }
   }
 
-  options { disableConcurrentBuilds(); parallelsAlwaysFailFast() }
+  options { disableConcurrentBuilds() }
 
   parameters {
-    string(name: 'DOCKERHUB_REPO',    defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
-    string(name: 'DOCKERFILE_PATH',   defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
-    string(name: 'BUILD_CONTEXT',     defaultValue: '.',                             description: 'Build context')
-    string(name: 'CHART_VALUES_PATH', defaultValue: 'flask-aws-monitor/values.yaml', description: 'Path to Helm values.yaml')
+    string(name: 'DOCKERHUB_REPO',  defaultValue: 'yonatan009/flask-aws-monitor', description: 'Docker Hub repo')
+    string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile',                    description: 'Dockerfile path')
+    string(name: 'BUILD_CONTEXT',   defaultValue: '.',                             description: 'Build context')
+  }
+
+  environment {
+    ENV_REPO_URL = 'https://github.com/Yonatan009/myapp.git'
+    CHART_VALUES_PATH = 'flask-aws-monitor/values.yaml'
   }
 
   stages {
 
-    stage('Checkout') {
+    stage('Checkout app') {
       steps {
         checkout scm
-        sh 'echo "Branch: $(git rev-parse --abbrev-ref HEAD)  Commit: $(git rev-parse --short HEAD)"'
       }
     }
 
-    stage('Init Vars') {
+    stage('Init vars') {
       steps {
         script {
-          env.SHORT_SHA   = sh(script: 'git rev-parse --short HEAD || echo local', returnStdout: true).trim()
-          env.SAFE_BRANCH = sh(script: 'echo "${BRANCH_NAME:-main}" | tr "/: " "-"', returnStdout: true).trim()
-          env.IMAGE_TAG   = "${env.SAFE_BRANCH}-${env.BUILD_NUMBER}-${env.SHORT_SHA}"
-          env.FULL_IMAGE  = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
+          env.IMAGE_TAG  = "0.1.${env.BUILD_NUMBER}"
+          env.FULL_IMAGE = "${params.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
           echo "IMAGE -> ${env.FULL_IMAGE}"
         }
       }
     }
 
-    stage('Quality (Parallel)') {
-      parallel {
-        stage('Linting') {
-          steps {
-            sh """
-              if command -v flake8 >/dev/null 2>&1; then flake8 .; else echo "flake8 not installed"; fi
-              if command -v shellcheck >/dev/null 2>&1; then \
-                find . -type f -name "*.sh" -print0 | xargs -0 -I{} sh -c 'shellcheck -x "{}" || true'; \
-              else echo "shellcheck not installed"; fi
-              if command -v hadolint >/dev/null 2>&1; then hadolint "${params.DOCKERFILE_PATH}" || true; else echo "hadolint not installed"; fi
-            """
-          }
-        }
-        stage('Security (Code)') {
-          steps {
-            sh """
-              if command -v bandit >/dev/null 2>&1; then bandit -r . || true; else echo "bandit not installed"; fi
-            """
-          }
-        }
-      }
-    }
-
-    stage('Build & Push (Kaniko)') {
+    stage('Build & Push image (Kaniko)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
           container('kaniko') {
-            sh """
+            sh '''
               set -eu
               mkdir -p /kaniko/.docker
-              AUTH_STR=\$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
+              AUTH_STR=$(printf "%s" "$DOCKER_USER:$DOCKER_PASS" | base64 | tr -d '\\n')
               cat > /kaniko/.docker/config.json <<EOF
-              { "auths": { "https://index.docker.io/v1/": { "auth": "\${AUTH_STR}" } } }
+              { "auths": { "https://index.docker.io/v1/": { "auth": "${AUTH_STR}" } } }
 EOF
-
               /kaniko/executor \
-                --context="${WORKSPACE}/${params.BUILD_CONTEXT}" \
-                --dockerfile="${WORKSPACE}/${params.DOCKERFILE_PATH}" \
-                --destination="${env.FULL_IMAGE}" \
+                --context="${WORKSPACE}/${BUILD_CONTEXT}" \
+                --dockerfile="${WORKSPACE}/${DOCKERFILE_PATH}" \
+                --destination="${FULL_IMAGE}" \
                 --cache=true \
-                --cache-repo="${params.DOCKERHUB_REPO}" \
+                --cache-repo="${DOCKERHUB_REPO}" \
                 --snapshot-mode=redo \
                 --use-new-run
-            """
+            '''
           }
         }
       }
     }
 
-    stage('Security (Image)') {
+    stage('Bump tag in env-repo & push') {
       steps {
-        sh """
-          if command -v trivy >/dev/null 2>&1; then
-            trivy image --no-progress --exit-code 0 "${FULL_IMAGE}"
-          else
-            echo "trivy not installed"
-          fi
-        """
+        withCredentials([usernamePassword(credentialsId: 'github-creds', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh '''
+            set -eu
+            rm -rf env-repo
+            git clone "https://${GH_USER}:${GH_TOKEN}@${ENV_REPO_URL#https://}" env-repo
+            cd env-repo
+
+            # Update .image.tag to the new tag
+            sed -i -E 's#^([[:space:]]*tag:[[:space:]]*).*$#\\1"'"${IMAGE_TAG}"'"#' "${CHART_VALUES_PATH}"
+
+            # (Optional) ensure repository is correct; uncomment if you want to pin it
+            # sed -i -E 's#^([[:space:]]*repository:[[:space:]]*).*$#\\1"'"${DOCKERHUB_REPO}"'"#' "${CHART_VALUES_PATH}"
+
+            git config user.name "Jenkins CI"
+            git config user.email "jenkins@example.com"
+            git add "${CHART_VALUES_PATH}"
+            git commit -m "chore: bump image tag to ${IMAGE_TAG}" || true
+            git push origin HEAD
+          '''
+        }
       }
     }
-
-    stage('Update Helm values') {
-      environment {
-        VALUES_FILE = "${params.CHART_VALUES_PATH}"
-      }
-      steps {
-        sh '''
-          set -eu
-          echo "Workspace at: $(pwd)"
-          echo "Requested values file: ${VALUES_FILE}"
-
-          if [ ! -f "${VALUES_FILE}" ]; then
-            if [ -f "flask-aws-monitor/values.yaml" ]; then
-              VALUES_FILE="flask-aws-monitor/values.yaml"
-              echo "Using fallback values file: ${VALUES_FILE}"
-            fi
-          fi
-
-          test -f "${VALUES_FILE}" || { echo "Values file not found: ${VALUES_FILE}"; ls -la; exit 2; }
-
-          sed -i -E 's#^([[:space:]]*tag:[[:space:]]*).*$#\\1"'"${IMAGE_TAG}"'"#' "${VALUES_FILE}"
-
-          echo "Updated image.tag to: ${IMAGE_TAG} in ${VALUES_FILE}"
-
-          printf 'VALUES_FILE=%s\n' "${VALUES_FILE}" > "$WORKSPACE/.jenkins_env"
-        '''
-      }
-    }
-
-    stage('Git Commit & Push') {
-      steps {
-        sh '''
-          set -eu
-          if [ -f "$WORKSPACE/.jenkins_env" ]; then
-            . "$WORKSPACE/.jenkins_env"
-          else
-            echo "Missing .jenkins_env"; exit 3
-          fi
-
-          git config user.name "Jenkins CI"
-          git config user.email "jenkins@example.com"
-
-          git add "${VALUES_FILE}"
-          git commit -m "Update image tag to ${IMAGE_TAG}" || true
-          git push origin "${SAFE_BRANCH}"
-        '''
-      }
-    }
-
   }
 
   post {
     success {
-      echo "Pushed image: ${FULL_IMAGE}"
+      echo "Done: ${FULL_IMAGE} pushed and env-repo updated."
     }
     failure {
       echo "Pipeline failed"
