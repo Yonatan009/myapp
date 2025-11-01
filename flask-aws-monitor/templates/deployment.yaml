@@ -19,10 +19,17 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           ports:
             - containerPort: 5001
+
+          {{- with .Values.readinessProbe }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 10 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.livenessProbe }}
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 10 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
