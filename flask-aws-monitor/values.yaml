@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: yonatan009/flask-aws-monitor
-  tag: "0.1.16-20251101T151818"
+  tag: "0.1.17-20251101T155626"
   pullPolicy: IfNotPresent
 
 # Requires ConfigMap "aws-config" in the target namespace
