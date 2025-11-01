@@ -120,30 +120,38 @@ EOF
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-creds', usernameVariable: 'PAT_USER', passwordVariable: 'PAT_PSW')]) {
           script {
-            def repoUrl = params.ENV_REPO_URL
-            if (!repoUrl.startsWith('https://')) { repoUrl = "https://${repoUrl}" }
+            // Prepare values in Groovy
+            def repoUrl   = params.ENV_REPO_URL.startsWith('https://') ? params.ENV_REPO_URL : "https://${params.ENV_REPO_URL}"
             def sanitized = repoUrl.replaceFirst('https://','')
 
-            sh '''
-              set -eu
-              rm -rf env-repo
-              git clone --branch "${ENV_REPO_BRANCH}" "${repoUrl}" env-repo
-              cd env-repo
+            // Pass them safely to the shell as environment vars
+            withEnv([
+              "REPO_URL=${repoUrl}",
+              "SANITIZED=${sanitized}",
+              "ENV_BRANCH=${params.ENV_REPO_BRANCH}",
+              "VALUES_PATH=${params.ENV_VALUES_PATH}"
+            ]) {
+              sh '''
+                set -eu
+                rm -rf env-repo
+                git clone --branch "$ENV_BRANCH" "$REPO_URL" env-repo
+                cd env-repo
 
-              VALUES_FILE="${ENV_VALUES_PATH}"
-              test -f "$VALUES_FILE" || { echo "values.yaml not found: $VALUES_FILE"; ls -la; exit 2; }
+                VALUES_FILE="$VALUES_PATH"
+                test -f "$VALUES_FILE" || { echo "values.yaml not found: $VALUES_FILE"; ls -la; exit 2; }
 
-              # Replace: image.tag: "<anything>"  -> image.tag: "<IMAGE_TAG>"
-              sed -i -E 's|^([[:space:]]*tag:[[:space:]]*).*$|\\1"'"${IMAGE_TAG}"'"|' "$VALUES_FILE"
+                # Replace: image.tag: "<anything>" -> image.tag: "<IMAGE_TAG>"
+                sed -i -E 's|^([[:space:]]*tag:[[:space:]]*).*$|\\1"'"${IMAGE_TAG}"'"|' "$VALUES_FILE"
 
-              git config user.name "Jenkins CI"
-              git config user.email "jenkins@example.com"
-              git add "$VALUES_FILE"
-              git commit -m "Bump image tag to ${IMAGE_TAG}" || true
+                git config user.name "Jenkins CI"
+                git config user.email "jenkins@example.com"
+                git add "$VALUES_FILE"
+                git commit -m "Bump image tag to ${IMAGE_TAG}" || true
 
-              git remote set-url origin "https://${PAT_USER}:${PAT_PSW}@${sanitized}"
-              git push origin "${ENV_REPO_BRANCH}"
-            '''
+                git remote set-url origin "https://${PAT_USER}:${PAT_PSW}@${SANITIZED}"
+                git push origin "$ENV_BRANCH"
+              '''
+            }
           }
         }
       }
