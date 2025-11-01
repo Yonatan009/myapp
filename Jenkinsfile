@@ -42,7 +42,7 @@ spec:
     stage('Init vars') {
       steps {
         script {
-          // Build numeric+datetime tag: <BASE_VERSION>.<BUILD_NUMBER>-<YYYYMMDDHHMMSS>
+          // Build numeric+datetime tag: <BASE_VERSION>.<BUILD_NUMBER>-<YYYYMMDDTHHMMSS>
           env.DATE_UTC   = sh(script: 'date -u +%Y%m%dT%H%M%S', returnStdout: true).trim()
           env.VERSION    = "${params.BASE_VERSION}.${env.BUILD_NUMBER}"
           env.IMAGE_TAG  = "${env.VERSION}-${env.DATE_UTC}"
@@ -84,6 +84,12 @@ spec:
               cat > /kaniko/.docker/config.json <<EOF
               { "auths": { "https://index.docker.io/v1/": { "auth": "${AUTH_STR}" } } }
 EOF
+
+              # Safe defaults/guards for set -u
+              : "${PUSH_LATEST:=false}"
+              : "${DOCKERHUB_REPO:?DOCKERHUB_REPO is required}"
+              : "${FULL_IMAGE:?FULL_IMAGE is required}"
+
               DESTS="--destination=${FULL_IMAGE}"
               if [ "${PUSH_LATEST}" = "true" ]; then
                 DESTS="$DESTS --destination=${DOCKERHUB_REPO}:latest"
