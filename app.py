@@ -9,7 +9,7 @@ app = Flask(__name__)
 # export AWS_ACCESS_KEY_ID="AKIA..."
 # export AWS_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxx"
 # export AWS_DEFAULT_REGION="us-east-1"
-
+###
 region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 session = boto3.Session(region_name=region)
 
